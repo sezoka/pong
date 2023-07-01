@@ -1,10 +1,13 @@
 #include <raylib.h>
 #include <stdio.h>
+#include <threads.h>
 
-#define PADDLE_WIDTH 10
-#define PADDLE_HEIGHT 50
-#define PADDLE_SPEED 200
-#define BALL_SIZE 10
+#define PADDLE_WIDTH 0.03   // 3vw
+#define PADDLE_HEIGHT 0.20  // 20vh
+#define PADDLE_SPEED 1.0    // 1vw per sec
+#define BALL_SIZE 0.03      // 1vw
+#define SCREEN_WIDTH 1.0
+#define SCREEN_HEIGHT 1.0
 
 typedef struct {
     float x;
@@ -21,8 +24,6 @@ typedef struct {
 } Paddle;
 
 typedef struct {
-    int field_w;
-    int field_h;
     Ball ball;
     Paddle left_paddle;
     Paddle right_paddle;
@@ -31,105 +32,106 @@ typedef struct {
 } State;
 
 void init_state(State* s) {
-    float scr_w = GetScreenWidth();
-    float scr_h = GetScreenHeight();
-
-    s->left_paddle.x = PADDLE_WIDTH;
+    s->left_paddle.x = PADDLE_WIDTH * 2.0;
     s->left_paddle.h = PADDLE_HEIGHT;
-    s->left_paddle.y = scr_h / 2 - PADDLE_HEIGHT / 2.0;
+    s->left_paddle.y = SCREEN_HEIGHT / 2.0 - PADDLE_HEIGHT / 2.0;
     s->left_paddle.w = PADDLE_WIDTH;
 
-    s->right_paddle.x = scr_w - PADDLE_WIDTH * 2;
+    s->right_paddle.x = SCREEN_WIDTH - PADDLE_WIDTH * 3.0;
     s->right_paddle.h = PADDLE_HEIGHT;
-    s->right_paddle.y = scr_h / 2 - PADDLE_HEIGHT / 2.0;
+    s->right_paddle.y = SCREEN_HEIGHT / 2.0 - PADDLE_HEIGHT / 2.0;
     s->right_paddle.w = PADDLE_WIDTH;
 
-    s->field_w = 200;
-    s->field_h = 200;
-
-    s->ball.x = scr_w / 2;
-    s->ball.y = scr_h / 2;
+    s->ball.x = SCREEN_WIDTH / 2.0;
+    s->ball.y = SCREEN_HEIGHT / 2.0;
 }
 
-int is_ball_collide(State* s) {
-    Ball* b = &s->ball;
-    Paddle* lp = &s->left_paddle;
-    Paddle* rp = &s->right_paddle;
-
-    Rectangle r0 = {b->x, b->y, 10, 10};
-    Rectangle r1 = {lp->x, lp->y, lp->w, lp->h};
-    Rectangle r2 = {rp->x, rp->y, rp->w, rp->h};
-
-    return CheckCollisionRecs(r0, r1) || CheckCollisionRecs(r0, r2);
+int get_screen_aspect_ratio() {
+    return GetScreenWidth() / GetScreenHeight();
 }
 
-int is_ball_collide_with_paddle(State* s, Paddle* paddle) {
-    Ball* b = &s->ball;
-    Rectangle b_rect = {b->x, b->y, 10, 10};
-    Rectangle p_rect = {paddle->x, paddle->y, paddle->w, paddle->h};
-    return CheckCollisionRecs(b_rect, p_rect);
+int is_ball_collide_with_paddle(Ball* b, Paddle* p) {
+    int aspect_ratio = get_screen_aspect_ratio();
+
+    if (p->x + p->w < b->x)
+        return false;
+
+    if (p->y + p->h < b->y)
+        return false;
+
+    if (b->x + BALL_SIZE < p->x)
+        return false;
+
+    if (b->y + BALL_SIZE * aspect_ratio < p->y)
+        return false;
+
+
+    return true;
 }
 
 void update_ball(State* s) {
     Ball ball = s->ball;
-    int ball_w = 10;
-    float field_w = GetScreenWidth();
-    float field_h = GetScreenHeight();
     Paddle* left_paddle = &s->left_paddle;
     Paddle* right_paddle = &s->right_paddle;
     float delta = GetFrameTime();
 
-    ball.x += ball.vx * delta;
+    int aspect_ratio = get_screen_aspect_ratio();
+
+    ball.x += ball.vx * aspect_ratio * delta;
     ball.y += ball.vy * delta;
+
 
     bool collided = false;
 
-    if (is_ball_collide_with_paddle(s, left_paddle)) {
-        ball.x = left_paddle->x + left_paddle->w + 1;
+    if (is_ball_collide_with_paddle(&ball, left_paddle)) {
+        ball.x = left_paddle->x + left_paddle->w;
         ball.vx = -ball.vx;
         collided = true;
-    } else if (is_ball_collide_with_paddle(s, right_paddle)) {
-        ball.x = right_paddle->x - 10 - 1;
+    } else if (is_ball_collide_with_paddle(&ball, right_paddle)) {
+        ball.x = right_paddle->x - BALL_SIZE;
         ball.vx = -ball.vx;
         collided = true;
     } else if (ball.y <= 0.0) {
         ball.y = 0.0;
         ball.vy = -ball.vy;
         collided = true;
-    } else if (field_h <= ball.y + BALL_SIZE) {
-        ball.y = field_h - BALL_SIZE;
+    } else if (SCREEN_HEIGHT <= ball.y + BALL_SIZE * aspect_ratio) {
+        ball.y = SCREEN_HEIGHT - BALL_SIZE * aspect_ratio;
         ball.vy = -ball.vy;
+        collided = true;
+    } else if (ball.x <= 0.0) {
+        ball.x = 0.0;
+        ball.vx = -ball.vx;
+        collided = true;
+    } else if (SCREEN_WIDTH <= ball.x + BALL_SIZE) {
+        ball.x = SCREEN_WIDTH - BALL_SIZE;
+        ball.vx = -ball.vx;
         collided = true;
     }
 
     if (collided) {
-        ball.vy *= GetRandomValue(8, 12) / 10.0;
-        ball.vx += 5;
+        ball.vy *= GetRandomValue(95, 110) / 100.0;
+        ball.vx *= GetRandomValue(95, 110) / 100.0;
     }
-
-    if (ball.x <= left_paddle->x + left_paddle->w) {
+    else if (ball.x < left_paddle->x + left_paddle->w) {
+        printf("x: %f, border: %f\n", ball.x, left_paddle->x + left_paddle->w);
         s->right_player_score += 1;
-        ball.x = right_paddle->x - BALL_SIZE - 5;
-        ball.y = right_paddle->y + right_paddle->h / 2.0 + 5.0;
-        ball.vx = -200;
-        ball.vy = GetRandomValue(-200, 200);
-    }
-
-    if (right_paddle->x < ball.x) {
+        ball.x = right_paddle->x - PADDLE_WIDTH;
+        ball.y = right_paddle->y + right_paddle->h / 2.0;
+        ball.vx = GetRandomValue(20, 40) / 100.0;
+        ball.vy = GetRandomValue(-40, 40) / 100.0;
+    } else if (right_paddle->x < ball.x) {
         s->left_player_score += 1;
-        ball.x = left_paddle->x + PADDLE_WIDTH + 5;
-        ball.y = left_paddle->y + left_paddle->h / 2.0 + 5.0;
-        ball.vx = 200;
-        ball.vy = GetRandomValue(-200, 200);
+        ball.x = left_paddle->x + left_paddle->w;
+        ball.y = left_paddle->y + left_paddle->h / 2.0 + BALL_SIZE / 2.0;
+        ball.vx = -GetRandomValue(20, 40) / 100.0;
+        ball.vy = GetRandomValue(-40, 40) / 100.0;
     }
 
     s->ball = ball;
 }
 
-void update_panel(State* s, Paddle* p, int up, int down) {
-    float field_w = GetScreenWidth();
-    float field_h = GetScreenHeight();
-
+void update_paddle(State* s, Paddle* p, int up, int down) {
     float delta = GetFrameTime();
 
     if (IsKeyDown(up))
@@ -139,33 +141,75 @@ void update_panel(State* s, Paddle* p, int up, int down) {
 
     if (p->y < 0) {
         p->y = 0;
-    } else if (field_h - p->h < p->y) {
-        p->y = field_h - p->h;
+    } else if (SCREEN_HEIGHT - p->h < p->y) {
+        p->y = SCREEN_HEIGHT - p->h;
     }
 }
 
-void update_panels(State* s) {
-    update_panel(s, &s->left_paddle, KEY_W, KEY_S);
-    update_panel(s, &s->right_paddle, KEY_UP, KEY_DOWN);
+void update_paddles(State* s) {
+    update_paddle(s, &s->left_paddle, KEY_W, KEY_S);
+    update_paddle(s, &s->right_paddle, KEY_UP, KEY_DOWN);
 }
 
 void update_state(State* s) {
-    update_panels(s);
+    update_paddles(s);
     update_ball(s);
+}
+
+Rectangle get_real_paddle_dimentions(Paddle* p) {
+    Rectangle r;
+    int scr_w = GetScreenWidth();
+    int scr_h = GetScreenHeight();
+    r.x = p->x * scr_w;
+    r.y = p->y * scr_h;
+    r.width = p->w * scr_w;
+    r.height = p->h * scr_h;
+    return r;
+}
+
+Rectangle get_real_ball_rect(Ball* b) {
+    Rectangle r;
+    int scr_w = GetScreenWidth();
+    int scr_h = GetScreenHeight();
+    r.x = b->x * scr_w;
+    r.y = b->y * scr_h;
+    r.width = BALL_SIZE * scr_w;
+    r.height = BALL_SIZE * scr_w;
+    return r;
+}
+
+void draw(State* s) {
+    char fps_string[10];
+    char score_string[10];
+
+    int scr_w = GetScreenWidth();
+    int scr_h = GetScreenHeight();
+
+    Rectangle left_paddle_rect = get_real_paddle_dimentions(&s->left_paddle);
+    Rectangle right_paddle_rect = get_real_paddle_dimentions(&s->right_paddle);
+    Rectangle ball_rect = get_real_ball_rect(&s->ball);
+
+    DrawRectangleRec(left_paddle_rect, BLACK);
+    DrawRectangleRec(right_paddle_rect, BLACK);
+    DrawRectangleRec(ball_rect, BLACK);
+
+    sprintf(fps_string, "%d", GetFPS());
+    DrawText(fps_string, 0, 0, 16, BLACK);
+    sprintf(fps_string, "%d : %d", s->left_player_score, s->right_player_score);
+    DrawText(fps_string, 0, 17, 16, BLACK);
 }
 
 int main() {
     InitWindow(800, 400, "pong");
-    SetWindowState(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    SetWindowState(FLAG_WINDOW_RESIZABLE
+                   // | FLAG_VSYNC_HINT
+    );
 
     State state;
     init_state(&state);
 
-    state.ball.vx = 200;
-    state.ball.vy = 200;
-
-    char fps_string[10];
-    char score_string[10];
+    state.ball.vx = 0.3;
+    state.ball.vy = 0.3;
 
     while (!WindowShouldClose()) {
         update_state(&state);
@@ -173,18 +217,10 @@ int main() {
         BeginDrawing();
         {
             ClearBackground(RAYWHITE);
-            DrawRectangle(state.ball.x, state.ball.y, 10, 10, BLACK);
-            DrawRectangle(10, state.left_paddle.y, 10, state.left_paddle.h,
-                          BLACK);
-            DrawRectangle(GetScreenWidth() - 20, state.right_paddle.y, 10,
-                          state.right_paddle.h, BLACK);
-            sprintf(fps_string, "%d", GetFPS());
-            DrawText(fps_string, 0, 0, 16, BLACK);
-            sprintf(fps_string, "%d : %d", state.left_player_score,
-                    state.right_player_score);
-            DrawText(fps_string, 0, 17, 16, BLACK);
+            draw(&state);
         }
         EndDrawing();
+        WaitTime(0.016);
     }
 
     return 0;
