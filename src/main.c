@@ -1,5 +1,9 @@
+#include <math.h>
 #include <raylib.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <threads.h>
 
 #define PADDLE_WIDTH 0.03   // 3vw
@@ -8,6 +12,16 @@
 #define BALL_SIZE 0.03      // 1vw
 #define SCREEN_WIDTH 1.0
 #define SCREEN_HEIGHT 1.0
+#define MAX_Y_VELOCITY 2.0
+#define MAX_X_VELOCITY 2.0
+#define FONT_SIZE 16
+
+typedef enum {
+    Running,
+    Left_Win_Screen,
+    Right_Win_Screen,
+    Main_Menu,
+} Step;
 
 typedef struct {
     float x;
@@ -29,6 +43,8 @@ typedef struct {
     Paddle right_paddle;
     int left_player_score;
     int right_player_score;
+    Step step;
+    bool pause;
 } State;
 
 void init_state(State* s) {
@@ -44,6 +60,9 @@ void init_state(State* s) {
 
     s->ball.x = SCREEN_WIDTH / 2.0;
     s->ball.y = SCREEN_HEIGHT / 2.0;
+
+    s->step = Running;
+    s->pause = true;
 }
 
 int get_screen_aspect_ratio() {
@@ -65,8 +84,17 @@ int is_ball_collide_with_paddle(Ball* b, Paddle* p) {
     if (b->y + BALL_SIZE * aspect_ratio < p->y)
         return false;
 
-
     return true;
+}
+
+void update_vy_after_paddle_collision(Ball* b, Paddle* p) {
+    float paddle_center_y = p->y + p->h / 2.0;
+    float ball_center_y = b->y + BALL_SIZE / 2.0;
+    float offset = sqrtf(fabs(paddle_center_y - ball_center_y));
+    if (ball_center_y < paddle_center_y)
+        b->vy -= offset;
+    else
+        b->vy += offset;
 }
 
 void update_ball(State* s) {
@@ -80,16 +108,17 @@ void update_ball(State* s) {
     ball.x += ball.vx * aspect_ratio * delta;
     ball.y += ball.vy * delta;
 
-
     bool collided = false;
 
     if (is_ball_collide_with_paddle(&ball, left_paddle)) {
         ball.x = left_paddle->x + left_paddle->w;
         ball.vx = -ball.vx;
+        update_vy_after_paddle_collision(&ball, left_paddle);
         collided = true;
     } else if (is_ball_collide_with_paddle(&ball, right_paddle)) {
         ball.x = right_paddle->x - BALL_SIZE;
         ball.vx = -ball.vx;
+        update_vy_after_paddle_collision(&ball, right_paddle);
         collided = true;
     } else if (ball.y <= 0.0) {
         ball.y = 0.0;
@@ -112,15 +141,15 @@ void update_ball(State* s) {
     if (collided) {
         ball.vy *= GetRandomValue(95, 110) / 100.0;
         ball.vx *= GetRandomValue(95, 110) / 100.0;
-    }
-    else if (ball.x < left_paddle->x + left_paddle->w) {
-        printf("x: %f, border: %f\n", ball.x, left_paddle->x + left_paddle->w);
+    } else if (ball.x < left_paddle->x + left_paddle->w) {
+        // s->step = Right_Win_Screen;
         s->right_player_score += 1;
         ball.x = right_paddle->x - PADDLE_WIDTH;
         ball.y = right_paddle->y + right_paddle->h / 2.0;
         ball.vx = GetRandomValue(20, 40) / 100.0;
         ball.vy = GetRandomValue(-40, 40) / 100.0;
     } else if (right_paddle->x < ball.x) {
+        // s->step = Left_Win_Screen;
         s->left_player_score += 1;
         ball.x = left_paddle->x + left_paddle->w;
         ball.y = left_paddle->y + left_paddle->h / 2.0 + BALL_SIZE / 2.0;
@@ -152,8 +181,17 @@ void update_paddles(State* s) {
 }
 
 void update_state(State* s) {
-    update_paddles(s);
-    update_ball(s);
+    if (s->step == Running) {
+        if (IsKeyPressed(KEY_P)) {
+            s->pause = !s->pause;
+        }
+        if (!s->pause) {
+            update_paddles(s);
+            update_ball(s);
+        }
+    } else if (s->step == Main_Menu) {
+    } else if (s->step == Left_Win_Screen) {
+    }
 }
 
 Rectangle get_real_paddle_dimentions(Paddle* p) {
@@ -178,9 +216,21 @@ Rectangle get_real_ball_rect(Ball* b) {
     return r;
 }
 
+char game_is_paused_text[] = "Paused";
+
 void draw(State* s) {
-    char fps_string[10];
-    char score_string[10];
+    if (s->step == Left_Win_Screen) {
+        // asdfdsaf
+    }
+
+    if (s->pause) {
+        int len = MeasureText(game_is_paused_text, FONT_SIZE);
+        int x = GetScreenWidth() - len - FONT_SIZE;
+        int y = FONT_SIZE;
+        DrawText(game_is_paused_text, x, y, FONT_SIZE, WHITE);
+    }
+
+    char string_buffer[10];
 
     int scr_w = GetScreenWidth();
     int scr_h = GetScreenHeight();
@@ -189,20 +239,21 @@ void draw(State* s) {
     Rectangle right_paddle_rect = get_real_paddle_dimentions(&s->right_paddle);
     Rectangle ball_rect = get_real_ball_rect(&s->ball);
 
-    DrawRectangleRec(left_paddle_rect, BLACK);
-    DrawRectangleRec(right_paddle_rect, BLACK);
-    DrawRectangleRec(ball_rect, BLACK);
+    DrawRectangleRec(left_paddle_rect, RAYWHITE);
+    DrawRectangleRec(right_paddle_rect, RAYWHITE);
+    DrawRectangleRec(ball_rect, RAYWHITE);
 
-    sprintf(fps_string, "%d", GetFPS());
-    DrawText(fps_string, 0, 0, 16, BLACK);
-    sprintf(fps_string, "%d : %d", s->left_player_score, s->right_player_score);
-    DrawText(fps_string, 0, 17, 16, BLACK);
+    sprintf(string_buffer, "%d", GetFPS());
+    DrawText(string_buffer, 0, 0, FONT_SIZE, RAYWHITE);
+    sprintf(string_buffer, "%d : %d", s->left_player_score, s->right_player_score);
+    int score_text_length = MeasureText(string_buffer, FONT_SIZE);
+    DrawText(string_buffer, GetScreenWidth() / 2 - score_text_length / 2, 17, FONT_SIZE, RAYWHITE);
 }
 
 int main() {
     InitWindow(800, 400, "pong");
     SetWindowState(FLAG_WINDOW_RESIZABLE
-                   // | FLAG_VSYNC_HINT
+                   | FLAG_VSYNC_HINT
     );
 
     State state;
@@ -216,11 +267,11 @@ int main() {
 
         BeginDrawing();
         {
-            ClearBackground(RAYWHITE);
+            ClearBackground(BLACK);
             draw(&state);
         }
         EndDrawing();
-        WaitTime(0.016);
+        // WaitTime(0.016);
     }
 
     return 0;
